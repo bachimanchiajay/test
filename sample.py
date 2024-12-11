@@ -1,54 +1,60 @@
-import fitz  # PyMuPDF
+import pymysql
+import json
 
-def generate_pdf_with_pymupdf(text, output_filename):
-    # Create a new PDF document
-    doc = fitz.open()
-    
-    # Add a page to the document
-    page = doc.new_page()
+# Function to delete records based on filename
+def delete_records_by_filename(connection, table_name, filenames):
+    try:
+        with connection.cursor() as cursor:
+            # Generate the SQL query to delete the records
+            sql_query = f"DELETE FROM {table_name} WHERE filename IN (%s)"
+            # Execute the query for the provided filenames
+            cursor.executemany(sql_query, [(filename,) for filename in filenames])
+            # Commit the transaction
+            connection.commit()
+            print(f"Deleted records for filenames: {filenames}")
+    except Exception as e:
+        print(f"Error while deleting records: {e}")
+        connection.rollback()
 
-    # Set font and size for the text
-    font = "helv"  # Helvetica font
-    font_size = 12
+# Establish RDS connection
+def connect_to_rds(username, password, host, database, port=3306):
+    try:
+        connection = pymysql.connect(
+            user=username,
+            password=password,
+            host=host,
+            database=database,
+            port=port,
+        )
+        return connection
+    except Exception as e:
+        print(f"Error connecting to RDS: {e}")
+        return None
 
-    # Define page dimensions and margins
-    page_width = page.rect.width
-    page_height = page.rect.height
-    left_margin = 50
-    right_margin = 50
-    top_margin = 50
-    bottom_margin = 50
-    usable_width = page_width - left_margin - right_margin
-    usable_height = page_height - top_margin - bottom_margin
+# Define RDS credentials and target table/filenames
+rds_credentials = {
+    "username": "your_rds_username",
+    "password": "your_rds_password",
+    "host": "your_rds_endpoint",
+    "database": "your_rds_database",
+    "port": 3306,  # Default MySQL port
+}
+table_name = "your_table_name"
+filenames_to_delete = [
+    "",
+    "",
+    # Add other filenames here
+]
 
-    # Define a rectangle for text placement
-    text_rect = fitz.Rect(left_margin, top_margin, page_width - right_margin, page_height - bottom_margin)
-
-    # Insert the text into the page
-    page.insert_textbox(
-        text_rect,
-        text,
-        fontsize=font_size,
-        fontname=font,
-        align=0,  # Align left
+# Main Execution
+if __name__ == "__main__":
+    connection = connect_to_rds(
+        rds_credentials["username"],
+        rds_credentials["password"],
+        rds_credentials["host"],
+        rds_credentials["database"],
+        rds_credentials["port"],
     )
-
-    # Save the PDF to the specified output file
-    doc.save(output_filename)
-    print(f"PDF saved as {output_filename}")
-
-# Example usage
-text = """Subject: Duplicate Claim Notification.
-
-Dear John Doe,
-
-We have received your claim submission for the incident that occurred on 28-Nov-2024 involving your Toyota Camry. After reviewing our records, we have determined that this submission is a duplicate claim.
-
-If you believe this is an error or if you have any questions, please contact our customer service team at 1-555-234-5678 or reply to this email.
-
-Thank you for your understanding.
-
-Best regards,
-Ageas Insurance"""
-output_filename = "example_output.pdf"
-generate_pdf_with_pymupdf(text, output_filename)
+    if connection:
+        delete_records_by_filename(connection, table_name, filenames_to_delete)
+        connection.close()
