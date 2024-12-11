@@ -1,60 +1,63 @@
 import pymysql
+import boto3
 import json
 
-# Function to delete records based on filename
-def delete_records_by_filename(connection, table_name, filenames):
+# AWS Region and Secret Manager Details
+aws_region = 'eu-west-2'
+secret_name = 'rds:cluster-7d6490f4-42f2-4cb7-891c-946b640be8ed'
+rds_cluster_endpoint = 'sb-udv3-tenant-06524939-ingestion.cluster-cshv5uhk4xst.eu-west-2.rds.amazonaws.com'
+database_name = 'udv3db'
+
+# Function to retrieve RDS credentials
+def get_rds_credentials(secret_name, region_name):
+    client = boto3.client('secretsmanager', region_name=region_name)
     try:
+        secret_response = client.get_secret_value(SecretId=secret_name)
+        secret_data = json.loads(secret_response['SecretString'])
+        return {
+            'username': secret_data['username'],
+            'password': secret_data['password'],
+            'host': rds_cluster_endpoint,
+            'port': secret_data.get('port', 3306)
+        }
+    except Exception as e:
+        print(f"Error retrieving RDS credentials: {e}")
+        return None
+
+# Function to delete records based on filename
+def delete_records_by_filename(credentials, table_name, filenames):
+    try:
+        # Establishing RDS connection
+        connection = pymysql.connect(
+            user=credentials['username'],
+            password=credentials['password'],
+            host=credentials['host'],
+            database=database_name,
+            port=credentials['port']
+        )
         with connection.cursor() as cursor:
-            # Generate the SQL query to delete the records
-            sql_query = f"DELETE FROM {table_name} WHERE filename IN (%s)"
-            # Execute the query for the provided filenames
-            cursor.executemany(sql_query, [(filename,) for filename in filenames])
-            # Commit the transaction
+            # SQL query to delete records
+            sql_query = f"DELETE FROM {table_name} WHERE filename = %s"
+            for filename in filenames:
+                cursor.execute(sql_query, (filename,))
             connection.commit()
             print(f"Deleted records for filenames: {filenames}")
     except Exception as e:
         print(f"Error while deleting records: {e}")
-        connection.rollback()
-
-# Establish RDS connection
-def connect_to_rds(username, password, host, database, port=3306):
-    try:
-        connection = pymysql.connect(
-            user=username,
-            password=password,
-            host=host,
-            database=database,
-            port=port,
-        )
-        return connection
-    except Exception as e:
-        print(f"Error connecting to RDS: {e}")
-        return None
-
-# Define RDS credentials and target table/filenames
-rds_credentials = {
-    "username": "your_rds_username",
-    "password": "your_rds_password",
-    "host": "your_rds_endpoint",
-    "database": "your_rds_database",
-    "port": 3306,  # Default MySQL port
-}
-table_name = "your_table_name"
-filenames_to_delete = [
-    "",
-    "",
-    # Add other filenames here
-]
+    finally:
+        if connection:
+            connection.close()
 
 # Main Execution
 if __name__ == "__main__":
-    connection = connect_to_rds(
-        rds_credentials["username"],
-        rds_credentials["password"],
-        rds_credentials["host"],
-        rds_credentials["database"],
-        rds_credentials["port"],
-    )
-    if connection:
-        delete_records_by_filename(connection, table_name, filenames_to_delete)
-        connection.close()
+    # Fetch RDS credentials
+    rds_credentials = get_rds_credentials(secret_name, aws_region)
+    if rds_credentials:
+        # Define table name and filenames to delete
+        table_name = "your_table_name"  # Replace with your actual table name
+        filenames_to_delete = [
+            "7122 WD-PIP-UK-BHR.pdf",
+            "10504 WD-HSP-UK-GPBT-PYC(10).docx"
+        ]
+        # Delete records
+        delete_records_by_filename(rds_credentials, table_name, filenames_to_delete)
